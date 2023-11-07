@@ -6,10 +6,9 @@ from pprint import pprint
 import argparse
 import requests
 import yaml
-from openpyxl import Workbook
-from openpyxl.worksheet.formula import ArrayFormula
-from openpyxl.styles import Font
 import re
+import xlsxwriter
+import sys
 
 from collections import defaultdict
 def nested_dict():
@@ -150,80 +149,10 @@ def fetch_issue_details(issue_ids, url, api_key):
         issue_details.append(data['issue'])
 
 
-    print('Progress: 100%')
+    print('Progress: 100%      ')
 
     return issue_details
 
-def generate_statistics(issue_details):
-    """
-    Generates statistics for each issue.
-
-    Args:
-        issue_details (list): List of issue details.
-
-    Returns:
-        list: List of dictionaries containing statistics for each issue.
-    """
-    statistics = []
-
-    for issue in issue_details:
-
-        #pdb.set_trace()
-
-        # get custom fields data
-        cfs = {}
-        for cf in issue['custom_fields']:
-
-            if cf['name'] == 'Principal Investigator':
-                try:
-                    cfs['pi_fullname']  = cf['value']
-                    cfs['pi_firstname'] = " ".join(cfs['pi_fullname'].split()[:-1])
-                    cfs['pi_lastname']  = cfs['pi_fullname'].split()[-1]
-                except:
-                    cfs['pi_firstname'] = ''
-                    cfs['pi_lastname']  = ''
-
-
-            elif cf['name'] == 'PI e-mail':
-                cfs['pi_email']     = cf['value']
-
-            elif cf['name'] == 'Organization':
-                cfs['org']          = uni_shortname2longname(cf['value'])
-
-            elif cf['name'] == 'Subject':
-                cfs['subject']      = cf['value']
-
-            elif cf['name'] == 'SCB Subject Code':
-                cfs['scb']          = cf['value']
-
-            elif cf['name'] == 'Funding':
-                cfs['funding']      = cf['value']
-
-            elif cf['name'] == 'Publication(s)':
-                cfs['publications'] = cf['value']
-
-            elif cf['name'] == 'PI Gender':
-                cfs['pi_gender']    = cf['value']
-
-            elif cf['name'] == 'WABI ID':
-                cfs['wabi_id']      = cf['value']
-
-        # pdb.set_trace()
-        statistics.append({
-            'Project ID'        : issue['id'],
-            'PI first name'     : cfs.get('pi_firstname',''),
-            'PI last name'      : cfs.get('pi_lastname',''),
-            'email'             : cfs.get('pi_email', ''),
-            'Organization'      : cfs.get('org',''),
-            'SCB Subject Code'  : cfs.get('scb',''),
-            'Sex'               : cfs.get('pi_gender',''),
-            'Subject'           : cfs.get('subject',''),
-            'LTS project ID'    : cfs.get('wabi_id',''),
-            'Publications'      : cfs.get('publications',''),
-            'Funding'           : cfs.get('funding','')
-        })
-
-    return statistics
 
 
 
@@ -251,87 +180,127 @@ def save_issues_as_excel(issue_details, output_path):
         issue_details (list): List of dictionaries containing issues.
         output_path (str): Path to save the Excel file.
     """
-    workbook = Workbook()
-    pl_sheet = workbook.active
-    pl_sheet.title = "Project list"
 
-    bold_font = Font(bold=True)
+    # create workbook and the project sheet
+    workbook  = xlsxwriter.Workbook(output_path)
+    pl_sheet  = workbook.add_worksheet("Project list")
+    bold_text = workbook.add_format({'bold': True})
 
-    # Write headers
-#    headers = list(statistics[0].keys())
+
+    # write headers
     headers = ['Project ID', 'PI first name', 'PI last name', 'email', 'Organization', 'SCB Subject Code', 'Sex', 'Tracker', 'LTS project ID', 'Publications', 'Funding', 'Spent time this period', 'Spent time total']
-    for col_num, header in enumerate(headers, 1):
-        pl_sheet.cell(row=1, column=col_num, value=header)
-        pl_sheet.cell(row=1, column=col_num).font = bold_font
+    for col_num, header in enumerate(headers):
+        pl_sheet.write(0, col_num, header, bold_text)
 
-    # Write data rows
-    for row_num, issue in enumerate(issue_details, 2):
 
-            # get PI first and last name
-            pi_name = get_custom_field(issue, 'Principal Investigator')
-            pi_name_split = pi_name.split(' ')
-            pi_last_name  = pi_name_split[-1]
-            pi_first_name = " ".join(pi_name_split[:-1])
+    # write data rows
+    for row_num, issue in enumerate(issue_details, 1):
 
-            # summarize the hours spent the requested period
-            time_spent_this_period = sum([ hours for hours in issue['spent_per_activity'].values() ])
+        # get PI first and last name
+        pi_name       = get_custom_field(issue, 'Principal Investigator')
+        pi_name_split = pi_name.split(' ')
+        pi_last_name  = pi_name_split[-1]
+        pi_first_name = " ".join(pi_name_split[:-1])
 
-            #pdb.set_trace()
+        # summarize the hours spent the requested period
+        time_spent_this_period = sum([ hours for hours in issue['spent_per_activity'].values() ])
 
-            # print values
-            pl_sheet.cell(row=row_num, column=1, value=issue.get('id',''))
-            pl_sheet.cell(row=row_num, column=2, value=pi_first_name)
-            pl_sheet.cell(row=row_num, column=3, value=pi_last_name)
-            pl_sheet.cell(row=row_num, column=4, value=get_custom_field(issue, 'PI e-mail'))
-            pl_sheet.cell(row=row_num, column=5, value=get_custom_field(issue, 'Organization'))
-            pl_sheet.cell(row=row_num, column=6, value=get_custom_field(issue, 'SCB Subject Code'))
-            pl_sheet.cell(row=row_num, column=7, value=get_custom_field(issue, 'PI Gender'))
-            pl_sheet.cell(row=row_num, column=8, value=issue.get('tracker',{}).get('name',''))
-            pl_sheet.cell(row=row_num, column=9, value=get_custom_field(issue, 'WABI ID'))
-            pl_sheet.cell(row=row_num, column=10, value=get_custom_field(issue, 'Publication(s)'))
-            pl_sheet.cell(row=row_num, column=11, value=get_custom_field(issue, 'Funding'))
-            pl_sheet.cell(row=row_num, column=12, value=time_spent_this_period)
-            pl_sheet.cell(row=row_num, column=13, value=issue.get('spent_hours',''))
+        #pdb.set_trace()
+
+        # print values
+        pl_sheet.write(row_num, 0,  issue.get('id',''))
+        pl_sheet.write(row_num, 1,  pi_first_name)
+        pl_sheet.write(row_num, 2,  pi_last_name)
+        pl_sheet.write(row_num, 3,  get_custom_field(issue, 'PI e-mail'))
+        pl_sheet.write(row_num, 4,  get_custom_field(issue, 'Organization'))
+        pl_sheet.write(row_num, 5,  get_custom_field(issue, 'SCB Subject Code'))
+        pl_sheet.write(row_num, 6,  get_custom_field(issue, 'PI Gender'))
+        pl_sheet.write(row_num, 7,  issue.get('tracker',{}).get('name',''))
+        pl_sheet.write(row_num, 8,  get_custom_field(issue, 'WABI ID'))
+        pl_sheet.write(row_num, 9,  get_custom_field(issue, 'Publication(s)'))
+        pl_sheet.write(row_num, 10, get_custom_field(issue, 'Funding'))
+        pl_sheet.write(row_num, 11, time_spent_this_period)
+        pl_sheet.write(row_num, 12, issue.get('spent_hours',''))
+
+
+
+
+
 
 
     ### do other statistics
 
     # PIs per uni
     if 1:
-        ppo_sheet = workbook.create_sheet("Projects per org")
+        ppo_sheet = workbook.add_worksheet("Projects per org")
 
         # print headers
-        ppo_sheet.cell(row=1, column=1, value="Organization")
-        ppo_sheet.cell(row=1, column=1).font = bold_font
-        ppo_sheet.cell(row=1, column=2, value="#")
-        ppo_sheet.cell(row=1, column=2).font = bold_font
+        ppo_sheet.write(f"A1", "Organization", bold_text)
+        ppo_sheet.write(f"B1", "#", bold_text)
 
         # print the UNIQUE function to get all org names
-        #ppo_sheet.cell(row=2, column=1, value="=_xlfn.UNIQUE('Project list'!E2:'Project list'!E1000)")
-        ppo_sheet.cell(row=2, column=1, value=ArrayFormula(f"A2:A50", f"=_xlfn.UNIQUE('Project list'!E2:'Project list'!E1000)"))
+        ppo_sheet.write(f'Y1', "Raw unsorted data for the plot, don't touch.")
+        ppo_sheet.write(f"Y2", "=UNIQUE('Project list'!$E$2:'Project list'!$E$10000)") # how to get rid of the 0 0 ?
 
         # print the counting function
-        for i in range(2,20):
-            #pdb.set_trace()
-            ppo_sheet.cell(row=i, column=2, value=f"=_xlfn.COUNTIF('Project list'!$E$2:'Project list'!$E$1000, A{i})")
-            #ppo_sheet.cell(row=i, column=2, value=f"=SUM(4,7)")
+        for row_num in range(2,200):
+
+            # for each row, print the number of occurences in the project list of the corresponding organization name, only if there is a org name on the current row
+            ppo_sheet.write(f"Z{row_num}", f"=IF( ISBLANK(Y{row_num}), \"\", COUNTIF('Project list'!$E$2:'Project list'!$E$1000, Y{row_num}))")
+
+
+        # create a sorted range for the pie chart
+        ppo_sheet.write('A2', f"=SORT(Y2:Z10000, 2)") # how to get rid of the spill over range filled with 0?
+
+        # create pie chart
+        ppo_chart = workbook.add_chart({'type': 'pie'})
+
+        # add data series
+        #[sheetname, first_row, first_col, last_row, last_col].
+        ppo_chart.add_series({
+            'name'       : '# projects',
+            'categories' : ['Projects per org', 1, 0, 1000, 0],
+            'values'     : ['Projects per org', 1, 1, 1000, 1],
+            "data_labels": {"category": True, 'position': 'outside_end'}
+        })
+
+        # tweak the chart
+        ppo_chart.set_title({'name': 'Projects per organization'})
+        ppo_chart.set_legend({'position': 'none'})
+        ppo_chart.set_size({'x_scale': 1.5, 'y_scale': 2})
+        ppo_chart.set_style(10)
+
+        # insert the chart
+        ppo_sheet.insert_chart('E2', ppo_chart)
+
+
+        ## chart style gallery, devel
+        #for i in range(1,49):
+
+        #    # create pie chart
+        #    ppo_chart = workbook.add_chart({'type': 'pie'})
+
+        #    # add data series
+        #    #[sheetname, first_row, first_col, last_row, last_col].
+        #    ppo_chart.add_series({
+        #        'name'      : '# projects',
+        #        'categories': ['Projects per org', 1, 0, 1000, 0],
+        #        'values'    : ['Projects per org', 1, 1, 1000, 1],
+        #    })
+
+        #    # set chart title, duh
+        #    ppo_chart.set_title({'name': 'Projects per organization'})
+        #    # set chart style
+        #    ppo_chart.set_style(i)
+
+        #    # insert the chart
+        #    ppo_sheet.write(f"D{2+i*15}", i)
+        #    ppo_sheet.insert_chart(f"E{2+i*15}", ppo_chart)
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-    workbook.save(output_path)
+    workbook.close()
     print(f'Statistics saved as {output_path}')
 
 def main():
