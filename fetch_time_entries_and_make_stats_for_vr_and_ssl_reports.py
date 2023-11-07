@@ -212,7 +212,7 @@ def save_issues_as_excel(issue_details, output_path):
         pl_sheet.write(row_num, 1,  pi_first_name)
         pl_sheet.write(row_num, 2,  pi_last_name)
         pl_sheet.write(row_num, 3,  get_custom_field(issue, 'PI e-mail'))
-        pl_sheet.write(row_num, 4,  get_custom_field(issue, 'Organization'))
+        pl_sheet.write(row_num, 4,  uni_shortname2longname(get_custom_field(issue, 'Organization')))
         pl_sheet.write(row_num, 5,  get_custom_field(issue, 'SCB Subject Code'))
         pl_sheet.write(row_num, 6,  get_custom_field(issue, 'PI Gender'))
         pl_sheet.write(row_num, 7,  issue.get('tracker',{}).get('name',''))
