@@ -7,6 +7,7 @@ import argparse
 import requests
 import yaml
 from openpyxl import Workbook
+from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.styles import Font
 import re
 
@@ -49,6 +50,15 @@ def uni_shortname2longname(uni):
     return translation.get(uni, uni)
 
 
+
+
+def uni_from_pi_email(email):
+    """
+    Guess the project's university based on the PIs email domain.
+    """
+
+    domain = email.split(".")[-2]
+    pass
 
 
 
@@ -131,11 +141,12 @@ def fetch_issue_details(issue_ids, url, api_key):
         progress = i / len(issue_ids) * 100
         print(f'Progress: {progress:.2f}%', end='\r')
 
-        # skip issues from other projects than defined below
+        # skip issues from other projects than defined below#        if data['issue'] ['project']['name'] not in ['National Bioinformatics Support', ] and not re.search('^Round ', data['issue'] ['project']['name']):
+        # should we keep all and filter later instead?
         if data['issue'] ['project']['name'] not in ['National Bioinformatics Support', ] and not re.search('^Round ', data['issue'] ['project']['name']):
             continue
        
-        data['issue']['spent_per_activity'] = issue_ids[issue_id]
+        data['issue']['spent_per_activity'] = dict(issue_ids[issue_id])
         issue_details.append(data['issue'])
 
 
@@ -156,6 +167,8 @@ def generate_statistics(issue_details):
     statistics = []
 
     for issue in issue_details:
+
+        #pdb.set_trace()
 
         # get custom fields data
         cfs = {}
@@ -212,56 +225,100 @@ def generate_statistics(issue_details):
 
     return statistics
 
-def save_statistics_as_excel(statistics, output_path):
+
+
+
+def get_custom_field(issue, field_name):
+
+
+    # get field value
+    field_value = [ field['value'] for field in issue['custom_fields'] if field['name']==field_name ]
+    if len(field_value) > 0:
+        field_value = field_value[0]
+    else:
+        field_value = ''
+
+    return field_value
+
+
+
+
+def save_issues_as_excel(issue_details, output_path):
     """
-    Saves the statistics as an Excel file.
+    Saves the issues as an Excel file and makes statistics as well.
 
     Args:
-        statistics (list): List of dictionaries containing statistics for each issue.
+        issue_details (list): List of dictionaries containing issues.
         output_path (str): Path to save the Excel file.
     """
     workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Project list"
+    pl_sheet = workbook.active
+    pl_sheet.title = "Project list"
 
     bold_font = Font(bold=True)
 
     # Write headers
-    headers = list(statistics[0].keys())
+#    headers = list(statistics[0].keys())
+    headers = ['Project ID', 'PI first name', 'PI last name', 'email', 'Organization', 'SCB Subject Code', 'Sex', 'Tracker', 'LTS project ID', 'Publications', 'Funding', 'Spent time this period', 'Spent time total']
     for col_num, header in enumerate(headers, 1):
-        sheet.cell(row=1, column=col_num, value=header)
-        sheet.cell(row=1, column=col_num).font = bold_font
+        pl_sheet.cell(row=1, column=col_num, value=header)
+        pl_sheet.cell(row=1, column=col_num).font = bold_font
 
     # Write data rows
-    for row_num, issue in enumerate(statistics, 2):
-        for col_num, value in enumerate(issue.values(), 1):
-            sheet.cell(row=row_num, column=col_num, value=value)
+    for row_num, issue in enumerate(issue_details, 2):
 
+            # get PI first and last name
+            pi_name = get_custom_field(issue, 'Principal Investigator')
+            pi_name_split = pi_name.split(' ')
+            pi_last_name  = pi_name_split[-1]
+            pi_first_name = " ".join(pi_name_split[:-1])
 
+            # summarize the hours spent the requested period
+            time_spent_this_period = sum([ hours for hours in issue['spent_per_activity'].values() ])
+
+            #pdb.set_trace()
+
+            # print values
+            pl_sheet.cell(row=row_num, column=1, value=issue.get('id',''))
+            pl_sheet.cell(row=row_num, column=2, value=pi_first_name)
+            pl_sheet.cell(row=row_num, column=3, value=pi_last_name)
+            pl_sheet.cell(row=row_num, column=4, value=get_custom_field(issue, 'PI e-mail'))
+            pl_sheet.cell(row=row_num, column=5, value=get_custom_field(issue, 'Organization'))
+            pl_sheet.cell(row=row_num, column=6, value=get_custom_field(issue, 'SCB Subject Code'))
+            pl_sheet.cell(row=row_num, column=7, value=get_custom_field(issue, 'PI Gender'))
+            pl_sheet.cell(row=row_num, column=8, value=issue.get('tracker',{}).get('name',''))
+            pl_sheet.cell(row=row_num, column=9, value=get_custom_field(issue, 'WABI ID'))
+            pl_sheet.cell(row=row_num, column=10, value=get_custom_field(issue, 'Publication(s)'))
+            pl_sheet.cell(row=row_num, column=11, value=get_custom_field(issue, 'Funding'))
+            pl_sheet.cell(row=row_num, column=12, value=time_spent_this_period)
+            pl_sheet.cell(row=row_num, column=13, value=issue.get('spent_hours',''))
 
 
     ### do other statistics
 
     # PIs per uni
     if 1:
-        new_sheet = workbook.create_sheet("Projects per uni")
-        unis = {}
-        for row in statistics:
-            try:
-                unis[row['Organization']] += 1
-            except:
-                unis[row['Organization']] = 1
+        ppo_sheet = workbook.create_sheet("Projects per org")
 
-        # Write headers
-        headers = ['Organization', '#']
-        for col_num, header in enumerate(headers, 1):
-            new_sheet.cell(row=1, column=col_num, value=header)
-            new_sheet.cell(row=1, column=col_num).font = bold_font
+        # print headers
+        ppo_sheet.cell(row=1, column=1, value="Organization")
+        ppo_sheet.cell(row=1, column=1).font = bold_font
+        ppo_sheet.cell(row=1, column=2, value="#")
+        ppo_sheet.cell(row=1, column=2).font = bold_font
 
-        # Write data rows
-        for row_num, uni in enumerate(unis.keys(), 2):
-            new_sheet.cell(row=row_num, column=1, value=uni)
-            new_sheet.cell(row=row_num, column=2, value=unis[uni])
+        # print the UNIQUE function to get all org names
+        #ppo_sheet.cell(row=2, column=1, value="=_xlfn.UNIQUE('Project list'!E2:'Project list'!E1000)")
+        ppo_sheet.cell(row=2, column=1, value=ArrayFormula(f"A2:A50", f"=_xlfn.UNIQUE('Project list'!E2:'Project list'!E1000)"))
+
+        # print the counting function
+        for i in range(2,20):
+            #pdb.set_trace()
+            ppo_sheet.cell(row=i, column=2, value=f"=_xlfn.COUNTIF('Project list'!$E$2:'Project list'!$E$1000, A{i})")
+            #ppo_sheet.cell(row=i, column=2, value=f"=SUM(4,7)")
+
+
+
+
 
 
 
@@ -291,8 +348,8 @@ def main():
 
     issue_ids       = fetch_time_entries(args.start_date, args.end_date, config['url'], config['api_key'])
     issue_details   = fetch_issue_details(issue_ids, config['url'], config['api_key'])
-    statistics      = generate_statistics(issue_details)
-    save_statistics_as_excel(statistics, args.output)
+    #statistics      = generate_statistics(issue_details)
+    save_issues_as_excel(issue_details, args.output)
 
 if __name__ == '__main__':
     main()
