@@ -388,6 +388,14 @@ def resolve_args(args):
         args.start_date = f"{args.year-1}-12-01"
         args.end_date   = f"{args.year  }-11-30"
 
+
+
+    # resolve --project-name
+    if args.project_name:
+
+        # convert all text names to project ids
+        for name in args.project_name:
+
     return args
 
 
@@ -437,29 +445,38 @@ def get_redmine_project_structure(config):
     all_projects = { proj['id']:proj for proj in all_projects }
 
     # Function to recursively build the dictionary
-    def build_project_hierarchy(project, child_id=None):
+    def build_project_hierarchy(project, child_ids):
 
-        if child_id:
+        if len(child_ids) > 0:
             try:
-                all_projects[project['id']]['children'].add(child_id)
+                all_projects[project['id']]['children'].update(child_ids)
             except:
                 all_projects[project['id']]['children'] = set()
-                all_projects[project['id']]['children'].add(child_id)
+                all_projects[project['id']]['children'].update(child_ids)
 
         # if we have reached the top
         if 'parent' not in project:
             return
 
-        build_project_hierarchy(all_projects[project['parent']['id']], child_id=project['id'])
+        # add this project and its children to the list of children
+        child_ids.add(project['id'])
+        child_ids.update(all_projects[project['id']].get('children', set()))
+
+        # pass on the child list to the parent
+        build_project_hierarchy(all_projects[project['parent']['id']], child_ids=child_ids)
 
 
     for project in all_projects.values():
-        build_project_hierarchy(project)
+        build_project_hierarchy(project, child_ids=set())
 
     pdb.set_trace()
 
 
 
+def create_project_filter_list(args, project_structure):
+    """
+    Creates a list of project ids we want to filter on. Based on --project-name, --project-id and --recursive.
+    """
 
 
 def main():
@@ -471,7 +488,7 @@ def main():
     parser.add_argument('-s', '--start-date', help='Start date in YYYY-MM-DD format', type=str, required=False,)
     parser.add_argument('-e', '--end-date',   help='End date in YYYY-MM-DD format',   type=str, required=False,)
     parser.add_argument('-c', '--config',     help='Config file path', required=False,)
-    parser.add_argument('-o', '--output',     help='Output file path', required=False,)
+    parser.add_argument('-o', '--output',     help='Output file path', required=True,)
     parser.add_argument('-y', '--year',       help='Shortcut to select start and end date as $(YEAR-1)-dec to $YEAR-dec'         , type=int)
     parser.add_argument('--sll',              help='Use to include the SciLifeLab report specific statistics in the output file.',      action='store_true')
     parser.add_argument('--vr',               help='Use to include the Vetenskapsrådet report specific statistics in the output file.', action='store_true')
@@ -496,6 +513,9 @@ def main():
 
     # construct the project hierarchy
     project_structure = get_redmine_project_structure(config)
+
+    # generate list of projects to filter out
+    project_id_filter_list = create_project_filter_list(args, project_structure)
 
     issue_ids       = fetch_time_entries(args, config['url'], config['api_key'])
     issue_details   = fetch_issue_details(issue_ids, config['url'], config['api_key'], args.project_id)
