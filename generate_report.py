@@ -395,6 +395,7 @@ def resolve_args(args):
 
         # convert all text names to project ids
         for name in args.project_name:
+            pass
 
     return args
 
