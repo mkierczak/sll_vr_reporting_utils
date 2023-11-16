@@ -4,6 +4,7 @@ import pdb
 from pprint import pprint
 
 import argparse
+from argparse import RawTextHelpFormatter
 import requests
 import yaml
 import re
@@ -73,7 +74,7 @@ def uni_from_pi_email(email):
 
 
 
-def fetch_time_entries(start_date, end_date, url, api_key):
+def fetch_time_entries(args, url, api_key):
     """
     Fetches the time entries within the specified date range and project ID.
 
@@ -89,7 +90,7 @@ def fetch_time_entries(start_date, end_date, url, api_key):
     """
     params = {
         'key': api_key,
-        'spent_on': f'><{start_date}|{end_date}',
+        'spent_on': f'><{args.start_date}|{args.end_date}',
 #        'project_id': project_id,
         'limit': 100,
         'offset': 0
@@ -141,7 +142,6 @@ def fetch_issue_details(issue_ids, url, api_key, project_filter):
     """
     issue_details = []
 
-    print('Fetching issue details:')
     for i, issue_id in enumerate(issue_ids, 1):
         response = requests.get(f'{url}/issues/{issue_id}.json', params={'key': api_key})
         response.raise_for_status()
@@ -149,11 +149,11 @@ def fetch_issue_details(issue_ids, url, api_key, project_filter):
 
         # Calculate progress percentage
         progress = i / len(issue_ids) * 100
-        print(f'Progress: {progress:.2f}%', end='\r')
+        print(f'Fetching issue details: {progress:.2f}%', end='\r')
 
         # skip issues from other projects than defined below#        if data['issue'] ['project']['name'] not in ['National Bioinformatics Support', ] and not re.search('^Round ', data['issue'] ['project']['name']):
         # filter out everything not in the requested filter list
-        pdb.set_trace()
+        #pdb.set_trace()
         if data['issue'] ['project']['name'] not in project_filter:
             continue
        
@@ -161,7 +161,7 @@ def fetch_issue_details(issue_ids, url, api_key, project_filter):
         issue_details.append(data['issue'])
 
 
-    print('Progress: 100%      ')
+    print('Fetching issue details: 100%      ')
 
     return issue_details
 
@@ -184,7 +184,7 @@ def get_custom_field(issue, field_name):
 
 
 
-def save_issues_as_excel(issue_details, output_path):
+def save_issues_as_excel(args, issue_details, output_path):
     """
     Saves the issues as an Excel file and makes statistics as well.
 
@@ -207,9 +207,9 @@ def save_issues_as_excel(issue_details, output_path):
     info_sheet.write("A2", "Start date:")
     info_sheet.write("B2", args.start_date)
     info_sheet.write("A3", "End date:")
-    info_sheet.write("B3", args.start_date)
+    info_sheet.write("B3", args.end_date)
     info_sheet.write("A4", "Redmine projects:")
-    info_sheet.write("B4", )
+    info_sheet.write("B4", ", ".join(args.project_id))
 
 
     # write headers
@@ -357,45 +357,53 @@ def resolve_args(args):
 
     # resolve --long-term
     if args.long_term:
+
+        long_term_project_name = "Long-term Support"
+
+        logging.info(f'--long-term specified, adding "{long_term_project_name}" to --project-id list, and setting --recursive.')
         try:
-            args.project_name += ['Long-term Support']
+            args.project_id += [long_term_project_name]
         except:
-            args.project_name  = ['Long-term Support']
+            args.project_id  = [long_term_project_name]
         args.recursive = True
 
 
 
     # resolve --sm-term
     if args.sm_term:
+
+        sm_term_project_name = 'National Bioinformatics Support'
+        logging.info(f'--sm-term specified, adding "{sm_term_project_name}" to --project-id list.')
+
         try:
-            args.project_name += ['National Bioinformatics Support']
+            args.project_id += [sm_term_project_name]
         except:
-            args.project_name  = ['National Bioinformatics Support']
+            args.project_id  = [sm_term_project_name]
 
 
 
     # resolve --dm
     if args.dm:
+
+        dm_activity_filter_text = "[DM]"
+        logging.info(f'--dm specified, adding "{dm_activity_filter_text}" to --activity-filter list.')
+
         try:
-            args.activity_filter += ['[DM]']
+            args.activity_filter += [dm_activity_filter_text]
         except:
-            args.activity_filter  = ['[DM]']
+            args.activity_filter  = [dm_activity_filter_text]
 
 
 
     # resolve --year
     if args.year:
+
+        logging.info(f"--year specified, setting --start-date to {args.year-1}-12-01 and --end-date to {args.year}-11-30")
         args.start_date = f"{args.year-1}-12-01"
         args.end_date   = f"{args.year  }-11-30"
 
 
 
-    # resolve --project-name
-    if args.project_name:
-
-        # convert all text names to project ids
-        for name in args.project_name:
-            pass
 
     return args
 
@@ -414,13 +422,13 @@ def get_redmine_project_structure(config):
     }
 
     # get the project list
-    all_projects = []
+    redmine_projects = []
     
     response = requests.get(f"{config['url']}/projects.json", params=params)
     response.raise_for_status()
     data = response.json()
 
-    all_projects.extend(data['projects'])
+    redmine_projects.extend(data['projects'])
 
     total_count = data['total_count']
     while params['offset'] < total_count:
@@ -429,7 +437,7 @@ def get_redmine_project_structure(config):
         data = response.json()
 
 
-        all_projects.extend(data['projects'])
+        redmine_projects.extend(data['projects'])
 
         params['offset'] += params['limit']
 
@@ -443,17 +451,35 @@ def get_redmine_project_structure(config):
     projects_dict = {}
 
     # restructure projects at a dict
-    all_projects = { proj['id']:proj for proj in all_projects }
+    redmine_projects = { proj['id']:proj for proj in redmine_projects }
+
+    redmine_projects['utils']                    = {}
+    redmine_projects['utils']['name2id']         = {}
+    redmine_projects['utils']['id2name']         = {}
+    redmine_projects['utils']['name2identifier'] = {}
+    redmine_projects['utils']['identifier2name'] = {}
+    redmine_projects['utils']['id2identifier']   = {}
+    redmine_projects['utils']['identifier2id']   = {}
+
 
     # Function to recursively build the dictionary
     def build_project_hierarchy(project, child_ids):
+        
+        # add name conversions to translation tables
+        redmine_projects['utils']['name2id'][project['name']]               = project['id']
+        redmine_projects['utils']['id2name'][project['id']]                 = project['name']
+        redmine_projects['utils']['name2identifier'][project['name']]       = project['identifier']
+        redmine_projects['utils']['identifier2name'][project['identifier']] = project['name']
+        redmine_projects['utils']['id2identifier'][project['id']]           = project['identifier']
+        redmine_projects['utils']['identifier2id'][project['identifier']]   = project['id']
 
+        # if there are any children to be added
         if len(child_ids) > 0:
             try:
-                all_projects[project['id']]['children'].update(child_ids)
+                redmine_projects[project['id']]['children'].update(child_ids)
             except:
-                all_projects[project['id']]['children'] = set()
-                all_projects[project['id']]['children'].update(child_ids)
+                redmine_projects[project['id']]['children'] = set()
+                redmine_projects[project['id']]['children'].update(child_ids)
 
         # if we have reached the top
         if 'parent' not in project:
@@ -461,46 +487,113 @@ def get_redmine_project_structure(config):
 
         # add this project and its children to the list of children
         child_ids.add(project['id'])
-        child_ids.update(all_projects[project['id']].get('children', set()))
+        child_ids.update(redmine_projects[project['id']].get('children', set()))
 
         # pass on the child list to the parent
-        build_project_hierarchy(all_projects[project['parent']['id']], child_ids=child_ids)
+        build_project_hierarchy(redmine_projects[project['parent']['id']], child_ids=child_ids)
 
 
-    for project in all_projects.values():
+    # process each project
+    for key,project in redmine_projects.items():
+
+        # skip utility key
+        if key == 'utils':
+            continue
+
         build_project_hierarchy(project, child_ids=set())
 
-    pdb.set_trace()
 
 
 
-def create_project_filter_list(args, project_structure):
+    return redmine_projects
+
+
+def create_project_filter_list(args, redmine_projects):
     """
-    Creates a list of project ids we want to filter on. Based on --project-name, --project-id and --recursive.
+    Creates a list of project ids we want to filter on. Based on --project-id and --recursive.
     """
+
+    # init
+    project_id_filter_list = set()
+
+    # convert all text names to project id#
+    for name in args.project_id:
+
+        match_found = False
+
+        # for all redmine projects
+        for project in redmine_projects.values():
+
+            # check if the name matches the id, name or identifier
+            if str(name) == str(project['id']) or name == project['identifier'] or name == project['name']:
+
+                # add the project id to the filter lsit
+                project_id_filter_list.add(project['id'])
+
+                # if recursive is set, add all children if any as well
+                if args.recursive:
+                    project_id_filter_list.update(project.get('children', []))
+
+                # jump to next name
+                match_found = True
+                break
+
+        # it didn't match any project
+        if not match_found:
+
+            if args.force:
+                logging.warn(f'Project identifier found no match among all Redmine projects: "{name}"')
+            else:
+                pdb.set_trace()
+                logging.error(f'Project identifier found no match among all Redmine projects: "{name}"')
+                sys.exit(-1)
+
+    return project_id_filter_list
 
 
 def main():
 
 
-    parser = argparse.ArgumentParser(description='Fetch Redmine time entries between two dates')
-    parser.add_argument('--project-id',       help='Redmine Project name to filer out (comma separated if multiple)', type=int, required=False,)
-    parser.add_argument('--project-name',     help='Redmine Project name to filer out (comma separated if multiple)', type=str, required=False,)
-    parser.add_argument('-s', '--start-date', help='Start date in YYYY-MM-DD format', type=str, required=False,)
-    parser.add_argument('-e', '--end-date',   help='End date in YYYY-MM-DD format',   type=str, required=False,)
-    parser.add_argument('-c', '--config',     help='Config file path', required=False,)
-    parser.add_argument('-o', '--output',     help='Output file path', required=True,)
-    parser.add_argument('-y', '--year',       help='Shortcut to select start and end date as $(YEAR-1)-dec to $YEAR-dec'         , type=int)
-    parser.add_argument('--sll',              help='Use to include the SciLifeLab report specific statistics in the output file.',      action='store_true')
-    parser.add_argument('--vr',               help='Use to include the Vetenskapsrådet report specific statistics in the output file.', action='store_true')
-    parser.add_argument('--dm',               help='Use to only consider time logged in an activity with "[DM]" in its name.', action='store_true')
-    parser.add_argument('--long-term',        help='Use to only include project in and under the "Long-term Support" project.', action='store_true')
-    parser.add_argument('--sm-term',          help='Use to only include project in and under the "National Bioinformatics Support" project.', action='store_true')
-    parser.add_argument('-r', '--recursive',  help='Use together with --project-id or --project-name to recursivly include all subprojects to the project specified.', action='store_true')
-    parser.add_argument('--activity-filter',  help='Words used to filter out activity types (comma separated if multiple).', type=str, required=False,)
+    # define arguments
+    parser = argparse.ArgumentParser(
+            description="Generate reports based on information from Redmine.",
+            epilog="""Example runs:
 
+# standard SciLifeLab report for short-medium term projects 2023
+python3 generate_report.py -c config.yaml --sll --sm-term   --year 2023 -o sll_2023.xlsx
+
+# standard SciLifeLab report for long term projects 2023
+python3 generate_report.py -c config.yaml --sll --long-term --year 2023 -o sll_2023.xlsx
+
+# standard VR report for short-medium term projects 2023
+python3 generate_report.py -c config.yaml --vr  --sm-term   --year 2023 -o sll_2023.xlsx
+
+# standard VR report for long term projects 2023
+python3 generate_report.py -c config.yaml --vr  --long-term --year 2023 -o sll_2023.xlsx
+""", formatter_class=RawTextHelpFormatter)
+
+    required_files_group = parser.add_argument_group('Required files')
+    required_files_group.add_argument('-c', '--config',     help='Config file path', required=True,)
+    required_files_group.add_argument('-o', '--output',     help='Output file path', required=True,)
+
+    shortcuts_group = parser.add_argument_group('Shortcut options')
+    shortcuts_group.add_argument('--dm',                    help='Use to only consider time logged in an activity with "[DM]" in its name.', action='store_true')
+    shortcuts_group.add_argument('--long-term',             help='Use to only include project in and under the "Long-term Support" project.', action='store_true')
+    shortcuts_group.add_argument('--sm-term',               help='Use to only include project in and under the "National Bioinformatics Support" project.', action='store_true')
+    shortcuts_group.add_argument('--sll',                   help='Use to include the SciLifeLab report specific statistics in the output file.',      action='store_true')
+    shortcuts_group.add_argument('--vr',                    help='Use to include the Vetenskapsrådet report specific statistics in the output file.', action='store_true')
+    shortcuts_group.add_argument('-y', '--year',            help='Shortcut to select start and end date as $(YEAR-1)-dec to $YEAR-dec'         , type=int)
+
+    filters_group = parser.add_argument_group('Filter options')
+    filters_group.add_argument('--project-id',              help='Redmine Project name/id#/identifier to filer out (comma separated if multiple)', type=str, required=False,)
+    filters_group.add_argument('--activity-filter',         help='Words used to filter out activity types (comma separated if multiple).', type=str, required=False,)
+    filters_group.add_argument('-s', '--start-date',        help='Start date in YYYY-MM-DD format', type=str, required=False,)
+    filters_group.add_argument('-e', '--end-date',          help='End date in YYYY-MM-DD format',   type=str, required=False,)
+    filters_group.add_argument('-f', '--force',             help='Use to continue generating the report even if there are warnings.', action='store_true')
+    filters_group.add_argument('-r', '--recursive',         help='Use together with --project-id or --project-name to recursivly include all subprojects to the project specified.', action='store_true')
 
     args = parser.parse_args()
+
 
     # check required args
     check_required_args(args)
@@ -513,15 +606,17 @@ def main():
     args = resolve_args(args)
 
     # construct the project hierarchy
-    project_structure = get_redmine_project_structure(config)
+    redmine_projects = get_redmine_project_structure(config)
 
     # generate list of projects to filter out
-    project_id_filter_list = create_project_filter_list(args, project_structure)
+    project_id_filter_list = create_project_filter_list(args, redmine_projects)
+
+    #pdb.set_trace()
 
     issue_ids       = fetch_time_entries(args, config['url'], config['api_key'])
     issue_details   = fetch_issue_details(issue_ids, config['url'], config['api_key'], args.project_id)
     #statistics      = generate_statistics(issue_details)
-    save_issues_as_excel(issue_details, args.output)
+    save_issues_as_excel(args, issue_details, args.output)
 
 if __name__ == '__main__':
     main()
