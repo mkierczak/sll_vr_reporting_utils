@@ -535,6 +535,20 @@ def generate_sll_report(issue_details, project_id, start_date, end_date, output_
         output_path (str): Path to save the Excel file.
     """
 
+    # define dict of consortium members
+    consortium_members = {
+            'Chalmers University of Technology':1,
+            'Karolinska Institutet':1,
+            'KTH Royal Institute of Technology':1,
+            'Linköping University':1,
+            'Lund University':1,
+            'Stockholm University':1,
+            'Swedish University of Agricultural Sciences':1,
+            'Umeå University':1,
+            'University of Gothenburg':1,
+            'Uppsala University':1,
+            'Naturhistoriska Riksmuséet':1,
+        }
     # init counter
     n_active  = 0
     n_consult = 0
@@ -563,6 +577,7 @@ def generate_sll_report(issue_details, project_id, start_date, end_date, output_
     rd_sheet.write("J1","Consortium", bold_text)
     rd_sheet.write("K1","Spent hours this period", bold_text)
     rd_sheet.write("L1","Redmine project", bold_text)
+    rd_sheet.write("M1","PI identifier", bold_text)
 
 
     # create a email to name translation table
@@ -642,11 +657,11 @@ def generate_sll_report(issue_details, project_id, start_date, end_date, output_
 
             # if it was still not found
             if not pi_affiliation:
-                pi_affiliation = 'Other Swedish organization'
+                pi_affiliation = ''
 
         # if affiliation is other, specify it
         pi_affiliation_details = ''
-        if pi_affiliation in ['Other Swedish University', 'International University', 'Healthcare', 'Industry', 'Other Swedish organization', 'Other international organization']:
+        if pi_affiliation in ['Other Swedish University', 'International University', 'Healthcare', 'Industry', 'Other Swedish organization', 'Other international organization', '']:
             # get organization name
             pi_affiliation_details = get_custom_field(issue, 'Organization') 
             if pi_affiliation_details == '' or pi_affiliation_details == 'Other':
@@ -668,19 +683,31 @@ def generate_sll_report(issue_details, project_id, start_date, end_date, output_
                                      'time_spent'            : time_spent_this_period
                                     }
 
+        # convert the tracker name to a type that matches the rest of the reporting
+        issue['report_type'] = issue['tracker']['name']
+        if issue['project']['name'] == 'Bioimage Informatics':
+            issue['report_type'] = 'BIIF'
+        elif re.match('Round \d{4}-\d+', issue['project']['name']):
+            issue['report_type'] = 'LTS'
+        if issue['tracker']['name'] == 'Partner Project':
+            issue['report_type'] = 'PP'
+
+
         # print raw data
-        rd_sheet.write(f"A{i}",issue['id'])
-        rd_sheet.write(f"B{i}",get_custom_field(issue, 'WABI ID'))
-        rd_sheet.write(f"C{i}",pi_first_name)
-        rd_sheet.write(f"D{i}",pi_last_name)
-        rd_sheet.write(f"E{i}",pi_email)
-        rd_sheet.write(f"F{i}",pi_affiliation)
-        rd_sheet.write(f"G{i}",get_custom_field(issue, 'SCB Subject Code'))
-        rd_sheet.write(f"H{i}",get_custom_field(issue, 'PI Gender'))
-        rd_sheet.write(f"I{i}",issue['tracker']['name'])
-        rd_sheet.write(f"J{i}",get_consortium(issue))
-        rd_sheet.write(f"K{i}",sum([ hours for hours in issue['spent_per_activity'].values() ]))
-        rd_sheet.write(f"L{i}",issue['project']['name'])
+        rd_sheet.write(f"A{i}", issue['id'])
+        rd_sheet.write(f"B{i}", get_custom_field(issue, 'WABI ID'))
+        rd_sheet.write(f"C{i}", pi_first_name)
+        rd_sheet.write(f"D{i}", pi_last_name)
+        rd_sheet.write(f"E{i}", pi_email)
+        rd_sheet.write(f"F{i}", pi_affiliation)
+        rd_sheet.write(f"G{i}", get_custom_field(issue, 'SCB Subject Code'))
+        rd_sheet.write(f"H{i}", get_custom_field(issue, 'PI Gender'))
+        rd_sheet.write(f"I{i}", issue['report_type'])
+        rd_sheet.write(f"J{i}", consortium_members.get(pi_affiliation, 0))
+        rd_sheet.write(f"K{i}", sum([ hours for hours in issue['spent_per_activity'].values() ]))
+        rd_sheet.write(f"L{i}", issue['project']['name'])
+        rd_sheet.write(f"M{i}", pi_email.lower())
+
 
 
         
@@ -802,14 +829,6 @@ def generate_sll_report(issue_details, project_id, start_date, end_date, output_
     workbook.close()
     print(f'Statistics saved as {output_path}')
 
-
-
-
-def get_consortium(issue):
-    """
-    Figure out consortium.
-    """
-    return ''
 
 
 
