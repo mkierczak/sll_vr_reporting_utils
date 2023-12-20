@@ -1,18 +1,33 @@
 # -*- coding: utf-8 -*-
 import requests
 import yaml
+import pdb
+from pprint import pprint
+import sys
 
 class Redmine_utils:
-
+"""
+A class to interact with the Redmine API.
+"""
 
 
 
 
     def __init__(self, config):
+        """
+        Initialize the class with the Redmine configuration.
+        """
 
         self.url      = config['url']
         self.api_key  = config['api_key']
         self.projects = self.get_project_structure()
+
+        # define the classification lexicon
+        self.lexicon = {'bengts_report': {
+                            'default': 'SMS',
+                            'Long-term Support': 'Long-term',
+                        },
+            }
 
 
 
@@ -36,6 +51,7 @@ class Redmine_utils:
         data = response.json()
 
         redmine_projects.extend(data['projects'])
+
 
         total_count = data['total_count']
         while params['offset'] < total_count:
@@ -71,6 +87,9 @@ class Redmine_utils:
     
         # Function to recursively build the dictionary
         def build_project_hierarchy(project, child_ids):
+            """
+            Recursively build the project hierarchy.
+            """
             
             # add name conversions to translation tables
             redmine_projects['utils']['name2id'][project['name']]               = project['id']
@@ -112,6 +131,51 @@ class Redmine_utils:
 
 
         return redmine_projects
+
+
+
+    def get_toplevel_project(self, proj_id):
+        """
+        Return the project id of the toplevel project that a project is a child of.
+        """
+
+        # if this is not a toplevel project, return the parent's toplevel project
+        if self.projects[proj_id].get("parent"):
+            return self.get_toplevel_project(self.projects[proj_id]['parent']['id'])
+        # if there is no parent, this is a toplevel project
+        else:
+            return proj_id
+
+
+
+    def classify_project(self, lexicon_name, proj_id):
+        """
+        Return the classification of a project according the requested lexicon.
+        """
+
+        # exit if the lexicon name is invalid
+        if lexicon_name not in self.lexicon:
+            sys.exit(f"ERROR: Lexicon not defined: {lexicon_name}")
+
+        # check if the proj_id is a name if it is not found
+        if proj_id not in self.projects:
+
+            possible_proj_id = [ proj['id'] for proj in self.projects if proj['name'] == proj_id ]
+            if len(possible_proj_id) == 1:
+                proj_id = possible_proj_id
+            else:
+                # how will deleted projects work here?
+                sys.exit(f"ERROR: proj_id \"{proj_id}\" neither a proj_id or proj_name.")
+
+
+        # return the classification if found, otherwise return the default classification for the lexicon
+        return self.lexicon[lexicon_name].get(self.projects[proj_id]['name'], self.lexicon[lexicon_name]['default'])
+
+
+
+
+
+
 
 
 
